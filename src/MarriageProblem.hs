@@ -1,13 +1,13 @@
 -- Permits multiple declarations of the same attribute in different classes.
 -- {-# LANGUAGE DuplicateRecordFields #-}
 
+-- module MarriageProblem where
 
 import Data.List -- For sort, findIndex
+import qualified Data.Map as Map
 import Data.Maybe -- For fromJust
-import Data.Tuple.Extra -- For &&&, snd3
-import Data.Bifunctor
+import Data.Tuple.Extra -- For &&&, snd3, uncurry3
 
--- import Data.Tuple
 
 type Man = String
 type Woman = String
@@ -15,69 +15,48 @@ type Woman = String
 type PrefMen = [(Man,[Woman])]
 type PrefWomen = [(Woman,[Man])]
 
-type TempMatching = [(Maybe Man, Woman)]
+type PartialMatching = Map.Map Woman Man
 
-data Matching = Matching [(Man,Woman)] deriving Show
+type Matching = [(Man,Woman)]
 
--- Could be made more efficient by directly sorting in all functions that return matchings and replace this special
--- implementation of equality with the default one that cares for order
-instance Eq Matching where
-  (Matching matching1) == (Matching matching2) = sort matching1 == sort matching2
-  -- The following assumes that matching1 is ordered by women.
-  -- (Matching matching1) == (Matching matching2) = matching1 == sortBy ((>) . (Data.Bifunctor.bimap snd snd)) matching2
-  -- (Matching matching1) == (Matching matching2) = and . zipWith (==) (map snd matching1) $
-  --   where men = map fst matching1
-
-deferred_acceptance_algorithm :: PrefMen -> PrefWomen -> Matching
-deferred_acceptance_algorithm prefs_men prefs_women =
-  Matching . map (Data.Bifunctor.first fromJust) . snd3 .
-  until (null . fst3) iterator $ (men, start_matching, prefs_men)
+deferredAcceptanceAlgorithm :: PrefMen -> PrefWomen -> Matching
+deferredAcceptanceAlgorithm prefs_men prefs_women =
+  map swap . Map.toList . snd .
+  until (null . fst . fst) iterator $ ((men, prefs_men), Map.empty)
   where
-    iterator :: ([Man], TempMatching, PrefMen) -> ([Man],TempMatching, PrefMen)
-    iterator ((m:men), matching, prefs_men) =
+    iterator :: (([Man],PrefMen), PartialMatching) -> (([Man],PrefMen), PartialMatching)
+    iterator ((m:men,prefs_men), matching) =
       let (new_matching, new_prefs_men, new_man) =
             eval_proposal m (get_favorite_woman m prefs_men) prefs_men prefs_women matching
-      in (update_men new_man men, new_matching, new_prefs_men)
+      in ((update_men new_man men, new_prefs_men), new_matching)
     update_men :: Maybe Man -> [Man] -> [Man]
     update_men (Just m) men = m : men
     update_men Nothing men = men
     men = map fst prefs_men
-    women = map fst prefs_women
-    start_matching :: TempMatching
-    start_matching = zip (repeat Nothing) women
 
-deferred_acceptance_algorithm_women_propose :: PrefMen -> PrefWomen -> Matching
-deferred_acceptance_algorithm_women_propose prefs_men =
-   (\(Matching m) -> Matching (map swap m)) . flip deferred_acceptance_algorithm prefs_men
 
--- -- deferred_acceptance_algorithm_helper :: [Man] -> [Woman] -> Matching -> Matching
--- -- deferred_acceptance_algorithm_helper (m:men) women matching =
---   -- m proposes
-
+deferredAcceptanceAlgorithm_women_propose :: PrefMen -> PrefWomen -> Matching
+deferredAcceptanceAlgorithm_women_propose prefs_men =
+   map swap . flip deferredAcceptanceAlgorithm prefs_men
+   
 
 -- Evaluate the proposal that the woman receives from the man.
-eval_proposal :: Man -> Woman -> PrefMen -> PrefWomen -> TempMatching -> (TempMatching, PrefMen, Maybe Man)
+eval_proposal :: Man -> Woman -> PrefMen -> PrefWomen -> PartialMatching -> (PartialMatching, PrefMen, Maybe Man)
 eval_proposal man woman prefs_men prefs_women matching =
-  if woman_prefers_man (get_woman_pref prefs_women woman) woman (Just man) old_man
-  then (update_partner woman man matching, forget_favorite_woman old_man prefs_men, old_man)
+  if woman_prefers_man (get_woman_pref prefs_women woman) man old_man
+  -- Make the man the partner of the woman in the matching.
+  then (Map.insert woman man matching, forget_favorite_woman old_man prefs_men, old_man)
   else (matching, forget_favorite_woman (Just man) prefs_men, Just man)
   where
+    -- Return True if the first man is preferred by the woman.
+    woman_prefers_man :: [Man] -> Man -> Maybe Man -> Bool
+    woman_prefers_man pref m1 (Just m2) =
+      fromJust $ (<) <$> (findIndex (== m1) pref) <*> findIndex (== m2) pref
+    woman_prefers_man _ _ _ = True
     old_man :: Maybe Man
-    old_man = (get_man matching woman)
+    old_man = Map.lookup woman matching
 
 
--- Return True if first man is preferred. One of the men (but not both) may be Nothing.
-woman_prefers_man :: [Man] -> Woman -> Maybe Man -> Maybe Man -> Bool
-woman_prefers_man pref woman (Just m1) (Just m2) =
-  fromJust $ (<) <$> (findIndex (== m1) pref) <*> findIndex (== m2) pref
-woman_prefers_man _ _ (Just _) Nothing = True
-woman_prefers_man _ _ Nothing (Just _) = False
-woman_prefers_man _ _ _ _ = error "Not both men in woman_prefers_man may be Nothing."
-
-
--- Make the man the partner of the woman in the matching.
-update_partner ::  Woman -> Man -> TempMatching -> TempMatching
-update_partner woman man = change_list ((==woman) . snd) (Data.Bifunctor.first (const (Just man)))
 
 -- Return the favorite woman of the man.
 get_favorite_woman :: Man -> PrefMen -> Woman
@@ -91,7 +70,7 @@ get_favorite_man woman = head . snd . fromJust . find ((==woman) . fst)
 -- Remove the man's favorite woman from the man's preference list.
 -- The man will forget the woman, knowing he has no chance with her.
 forget_favorite_woman :: Maybe Man -> PrefMen -> PrefMen
-forget_favorite_woman (Just man) = change_list ((==man) . fst) (Data.Bifunctor.second tail)
+forget_favorite_woman (Just man) = change_list ((==man) . fst) (second tail)
 forget_favorite_woman Nothing = id
 
 
@@ -100,13 +79,8 @@ get_woman_pref :: PrefWomen -> Woman -> [Man]
 get_woman_pref prefs woman = snd . fromJust . find ((==woman) . fst) $ prefs
 
 -- Given a matching and a man, return his partner, if existent.
--- get_woman :: TempMatching -> Man -> Maybe Woman
+-- get_woman :: PartialMatching -> Man -> Maybe Woman
 -- get_woman match man = fmap snd . find ((==(Just man)) . fst) $ match
-
--- Given a matching and a woman, return her partner, if existent.
-get_man :: TempMatching -> Woman -> Maybe Man
-get_man match woman = fst . fromJust . find ((==woman) . snd) $ match
-
 
 
 -- Could save some permutations for the women
@@ -140,21 +114,21 @@ change_list p f = map (\a -> if p a then f a else a)
 -- number of possibilities: 46656
 -- number of possibilites for which the matching is fair: 34080
 
--- Find matchings for setups with n actors per gender from the deferred_acceptance_algorithm
+-- Find matchings for setups with n actors per gender from the deferredAcceptanceAlgorithm
 -- that agree for both men and women.
 -- Very inefficent, since it checks all permutations.
 compute_fair_matchings :: Int -> [(Matching,PrefMen,PrefWomen)]
 compute_fair_matchings =
   map (\((matching,_),(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women))
   . filter (uncurry (==) . fst)
-  . map (Data.Bifunctor.first ((uncurry deferred_acceptance_algorithm) &&& (uncurry deferred_acceptance_algorithm_women_propose)))
+  . map (first ((uncurry deferredAcceptanceAlgorithm) &&& (uncurry deferredAcceptanceAlgorithm_women_propose)))
   . map dupe
   . generate_all
 
 compute_all_matchings :: Int -> [(Matching,PrefMen,PrefWomen)]
 compute_all_matchings =
   map (\(matching,(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women))
-  . map (Data.Bifunctor.first (uncurry deferred_acceptance_algorithm))
+  . map (first (uncurry deferredAcceptanceAlgorithm))
   . map dupe
   . generate_all
 
@@ -166,23 +140,22 @@ filter_no_favorite_person = filter (uncurry3 no_favorite_person)
 -- Given a matching, a preference of men and a preference of women,
 -- return True if and only if no person receives their favorite partner.
 no_favorite_person :: Matching -> PrefMen -> PrefWomen -> Bool
-no_favorite_person (Matching matching) prefs_men prefs_women = null . filter is_favorite $ matching
+no_favorite_person matching prefs_men prefs_women = null . filter is_favorite $ matching
   where
     is_favorite :: (Man, Woman) -> Bool
     is_favorite (man, woman) =
       (get_favorite_woman man prefs_men) == woman || (get_favorite_man woman prefs_women) == man
 
--- Return the deferred_acceptance_algorithm matching if and only if no person receives their favorite partner.
+-- Return the deferredAcceptanceAlgorithm matching if and only if no person receives their favorite partner.
 -- Just a wrapper around no_favorite_person for convenience.
 check_for_favorite_person :: (PrefMen, PrefWomen) -> Maybe Matching
 check_for_favorite_person prefs@(prefs_men, prefs_women) =
   if no_favorite_person matching prefs_men prefs_women
   then Just matching
   else Nothing
-  where matching = (uncurry deferred_acceptance_algorithm) prefs
+  where matching = (uncurry deferredAcceptanceAlgorithm) prefs
 
 
---- Tests
 
 -- Test for correctness, but not fair.
 prefs :: (PrefMen, PrefWomen)
@@ -191,13 +164,13 @@ prefs = ([("m1", ["w1", "w3", "w4", "w2"]), ("m2", ["w1", "w3", "w2", "w4"]),
          [("w1", ["m4", "m3", "m1", "m2"]), ("w2", ["m2", "m4", "m1", "m3"]),
           ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
 -- Works. Tested with:
--- (uncurry deferred_acceptance_algorithm) prefs,
--- (uncurry deferred_acceptance_algorithm_women_propose) prefs
+-- (uncurry deferredAcceptanceAlgorithm) prefs,
+-- (uncurry deferredAcceptanceAlgorithm_women_propose) prefs
 
 -- This example shows that the stable matchings are not optimal for all men (strongly Pareto optimal)
 -- when considering the set of all (not necessarily stable) matchings.
 -- That the resulting matching is fair can be checked directly or by "looking it up":
--- (,,) ((uncurry deferred_acceptance_algorithm) prefs2) (fst prefs2) (snd prefs2) `elem` (compute_fair_matchings $ 3).
+-- (,,) ((uncurry deferredAcceptanceAlgorithm) prefs2) (fst prefs2) (snd prefs2) `elem` (compute_fair_matchings $ 3).
 -- The matching is [("m2","w1"),("m1","w2"),("m3","w3")] and an improvement for the men is [("m1", "w1"), ("m2","w2"), ("m3","w3")].
 prefs2 :: (PrefMen, PrefWomen)
 prefs2 = ([("m1", ["w1", "w2", "w3"]), ("m2", ["w2", "w1", "w3"]), ("m3", ["w1", "w2", "w3"])],
@@ -214,3 +187,6 @@ prefs3 = ([("m1", ["w1", "w2", "w3", "w4"]), ("m2", ["w1", "w4", "w3", "w2"]),
           ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
 
 
+-- First personal counter example, found using
+-- head . filter_no_favorite_person . compute_fair_matchings $ 4
+-- (Matching [("m3","w1"),("m1","w2"),("m2","w3"),("m4","w4")],[("m1",["w1","w2","w3","w4"]),("m2",["w1","w2","w3","w4"]),("m3",["w2","w1","w3","w4"]),("m4",["w3","w4","w2","w1"])],[("w1",["m4","m3","m2","m1"]),("w2",["m4","m1","m2","m3"]),("w3",["m1","m2","m3","m4"]),("w4",["m3","m4","m2","m1"])])
