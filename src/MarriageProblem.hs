@@ -1,7 +1,8 @@
 -- Permits multiple declarations of the same attribute in different classes.
 -- {-# LANGUAGE DuplicateRecordFields #-}
 
--- module MarriageProblem where
+
+module MarriageProblem where
 
 import Data.List -- For sort, findIndex
 import qualified Data.Map as Map
@@ -35,8 +36,8 @@ deferredAcceptanceAlgorithm prefs_men prefs_women =
     men = map fst prefs_men
 
 
-deferredAcceptanceAlgorithm_women_propose :: (Ord a, Eq b) => PrefMen a b -> PrefWomen a b -> Matching a b
-deferredAcceptanceAlgorithm_women_propose prefs_men =
+deferredAcceptanceAlgorithmWomenPropose :: (Ord a, Eq b) => PrefMen a b -> PrefWomen a b -> Matching a b
+deferredAcceptanceAlgorithmWomenPropose prefs_men =
    map swap . flip deferredAcceptanceAlgorithm prefs_men
 
 
@@ -79,7 +80,7 @@ get_woman_pref :: Eq b => PrefWomen a b -> Woman b -> [Man a]
 get_woman_pref prefs woman = snd . fromJust . find ((==woman) . fst) $ prefs
 
 
--- Could save some permutations for the women
+-- TODO: Could save some permutations for the women
 generate_all :: Int -> [(PrefMen String String,PrefWomen String String)]
 generate_all n = (,) <$> prefs_men <*> prefs_women
   where
@@ -93,7 +94,7 @@ generate_all n = (,) <$> prefs_men <*> prefs_women
 -- If the given list contains k lements, then the returned list thus contains k^n elements.
 draw_with_putting_back :: Int -> [a] -> [[a]]
 draw_with_putting_back 0 _ = []
-draw_with_putting_back 1 list = map (\s -> [s]) list
+draw_with_putting_back 1 list = map singleton list
 draw_with_putting_back n list = concat [map (element:) (draw_with_putting_back (n-1) list) | element <- list]
 
 
@@ -106,27 +107,19 @@ change_list p f = map (\a -> if p a then f a else a)
 -- If a matching is the result of the deferred acceptance algorithm if both men and women propose (call it "fair"),
 -- then at least one person gets their first choice.
 
--- Numbers for n = 3:
--- number of possibilities: 46656
--- number of possibilites for which the matching is fair: 34080
 
 -- Find matchings for setups with n actors per gender from the deferredAcceptanceAlgorithm
 -- that agree for both men and women.
--- Very inefficent, since it checks all permutations.
+-- Very inefficent since it checks all permutations.
 compute_fair_matchings :: Int -> [(Matching String String, PrefMen String String, PrefWomen String String)]
 compute_fair_matchings =
   map (\((matching,_),(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women))
   . filter (uncurry (==) . fst)
-  . map (first ((uncurry deferredAcceptanceAlgorithm) &&& (uncurry deferredAcceptanceAlgorithm_women_propose)))
-  . map dupe
-  . generate_all
+  . map (first (uncurry deferredAcceptanceAlgorithm &&& uncurry deferredAcceptanceAlgorithmWomenPropose) . dupe) . generate_all
 
 compute_all_matchings :: Int -> [(Matching String String,PrefMen String String,PrefWomen String String)]
 compute_all_matchings =
-  map (\(matching,(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women))
-  . map (first (uncurry deferredAcceptanceAlgorithm))
-  . map dupe
-  . generate_all
+  map ((\(matching,(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women)) . first (uncurry deferredAcceptanceAlgorithm) . dupe) . generate_all
 
 
 filter_no_favorite_person :: (Eq a, Eq b) => [(Matching a b,PrefMen a b,PrefWomen a b)] -> [(Matching a b,PrefMen a b,PrefWomen a b)]
@@ -149,52 +142,19 @@ check_for_favorite_person prefs@(prefs_men, prefs_women) =
   if no_favorite_person matching prefs_men prefs_women
   then Just matching
   else Nothing
-  where matching = (uncurry deferredAcceptanceAlgorithm) prefs
+  where matching = uncurry deferredAcceptanceAlgorithm prefs
+
+-- Check whether the given matching is stable.
+isStableMatching :: (Eq a, Eq b) => PrefMen a b -> PrefWomen a b -> Matching a b -> Bool
+isStableMatching prefs_men prefs_women matching =
+  any mapper matching
+  where
+    -- mapper :: (Man a, Woman b) -> Bool
+    mapper (m,w) = any (new_man_is_preferred m (get_partner_woman matching w)) . takeWhile (/= w) . snd . fromJust . find ((== m) . fst) $ prefs_men
+    -- new_man_is_preferred :: Man a -> Man a -> Woman b -> Bool
+    new_man_is_preferred new_man old_man woman = (== new_man) . fromJust . find (`elem` [old_man,new_man]) . snd .
+      fromJust . find ((== woman) . fst) $ prefs_women
 
 
---- Tests
-
-
-
--- Test for correctness, but not fair.
-prefs :: (PrefMen String String, PrefWomen String String)
-prefs = ([("m1", ["w1", "w3", "w4", "w2"]), ("m2", ["w1", "w3", "w2", "w4"]),
-          ("m3", ["w2", "w1", "w3", "w4"]), ("m4" , ["w2", "w4" , "w1", "w3"])],
-         [("w1", ["m4", "m3", "m1", "m2"]), ("w2", ["m2", "m4", "m1", "m3"]),
-          ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
--- Works. Tested with:
--- (uncurry deferredAcceptanceAlgorithm) prefs,
--- (uncurry deferredAcceptanceAlgorithm_women_propose) prefs
-
--- This example shows that the stable matchings are not optimal for all men (strongly Pareto optimal)
--- when considering the set of all (not necessarily stable) matchings.
--- That the resulting matching is fair can be checked directly or by "looking it up":
--- (,,) ((uncurry deferredAcceptanceAlgorithm) prefs2) (fst prefs2) (snd prefs2) `elem` (compute_fair_matchings $ 3).
--- The matching is [("m2","w1"),("m1","w2"),("m3","w3")] and an improvement for the men is [("m1", "w1"), ("m2","w2"), ("m3","w3")].
-prefs2 :: (PrefMen String String, PrefWomen String String)
-prefs2 = ([("m1", ["w1", "w2", "w3"]), ("m2", ["w2", "w1", "w3"]), ("m3", ["w1", "w2", "w3"])],
-          [("w1", ["m2", "m3", "m1"]), ("w2", ["m1", "m3", "m2"]), ("w3", ["m1", "m2", "m3"])])
-
--- This provides a counterexample to my original question.
--- I discovered it here: https://math.stackexchange.com/questions/1332591/does-the-gale-shapley-stable-marriage-algorithm-give-at-least-one-person-his-or.
--- Check via
--- check_for_favorite_person prefs2.
-prefs3 :: (PrefMen String String, PrefWomen String String)
-prefs3 = ([("m1", ["w1", "w2", "w3", "w4"]), ("m2", ["w1", "w4", "w3", "w2"]),
-          ("m3", ["w2", "w1", "w3", "w4"]), ("m4" , ["w4", "w2" , "w3", "w1"])],
-         [("w1", ["m4", "m3", "m1", "m2"]), ("w2", ["m2", "m4", "m1", "m3"]),
-          ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
-
-
--- First personal counter example, found using
--- head . filter_no_favorite_person . compute_fair_matchings $ 4
--- (Matching a b [("m3","w1"),("m1","w2"),("m2","w3"),("m4","w4")],[("m1",["w1","w2","w3","w4"]),("m2",["w1","w2","w3","w4"]),("m3",["w2","w1","w3","w4"]),("m4",["w3","w4","w2","w1"])],[("w1",["m4","m3","m2","m1"]),("w2",["m4","m1","m2","m3"]),("w3",["m1","m2","m3","m4"]),("w4",["m3","m4","m2","m1"])])
-
-
-prefs4 :: (PrefMen Int Int, PrefWomen Int Int)
-prefs4 = ([(0, [7,5,6,4]), (1, [5,4,6,7]),
-           (2, [4, 5, 6, 7]), (3, [4, 5, 6, 7])],
-          [(4, [0, 1, 2, 3]), (5, [0, 1, 2, 3]),
-           (6, [0, 1, 2, 3]), (7, [0, 1, 2, 3])])
-
-result = (uncurry deferredAcceptanceAlgorithm) prefs4
+get_partner_woman :: Eq b => Matching a b -> Woman b -> Man a
+get_partner_woman matching w = fst . fromJust $ find ((== w) . snd) matching
