@@ -87,29 +87,27 @@ get_woman_pref prefs woman = snd . fromJust . find ((==woman) . fst) $ prefs
 
 -- * Example Generation
 
+
+compute_all_matchings :: Int -> [(Matching Int Int, PrefMen Int Int, PrefWomen Int Int)]
+compute_all_matchings =
+  map ((\(matching,(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women)) . first (uncurry deferredAcceptanceAlgorithm) . dupe) . generate_all
+
+
 -- Find matchings for setups with n actors per gender from the deferredAcceptanceAlgorithm
 -- that agree for both men and women.
 -- Very inefficent since it checks all permutations.
-compute_fair_matchings :: Int -> [(Matching String String, PrefMen String String, PrefWomen String String)]
+compute_fair_matchings :: Int -> [(Matching Int Int, PrefMen Int Int, PrefWomen Int Int)]
 compute_fair_matchings =
   map (\((matching,_),(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women))
   . filter (uncurry (==) . fst)
   . map (first (uncurry deferredAcceptanceAlgorithm &&& uncurry deferredAcceptanceAlgorithmWomenPropose) . dupe) . generate_all
 
-compute_all_matchings :: Int -> [(Matching String String, PrefMen String String, PrefWomen String String)]
-compute_all_matchings =
-  map ((\(matching,(prefs_men, prefs_women)) -> (matching, prefs_men, prefs_women)) . first (uncurry deferredAcceptanceAlgorithm) . dupe) . generate_all
-
 
 -- TODO: Could save some permutations for the women
-generate_all :: Int -> [(PrefMen String String, PrefWomen String String)]
-generate_all n = (,) <$> prefs_men <*> prefs_women
+generate_all :: Int -> [(PrefMen Int Int, PrefWomen Int Int)]
+generate_all n = (,) <$> prefs <*> prefs
   where
-    men = map (("m"++) . show) [1..n]
-    women = map (("w"++) . show) [1..n]
-    prefs_men = map (zip men) . draw_with_putting_back n . permutations $ women
-    -- Maybe could save work here if men and women are named the same...
-    prefs_women = map (zip women) . draw_with_putting_back n . permutations $ men
+    prefs = map (zip [1..n]) . draw_with_putting_back n . permutations $ [1..n]
 
 -- Generate all n element sets, where order matters and elements may be drawn multiple times.
 -- If the given list contains k lements, then the returned list thus contains k^n elements.
@@ -144,6 +142,7 @@ isStableMatching prefs_men prefs_women matching =
 
 get_partner_woman :: Eq b => [(Man a, Woman b)] -> Woman b -> Man a
 get_partner_woman matching w = fst . fromJust $ find ((== w) . snd) matching
+
 
 -- ** Check if someone gets favorite person
 
