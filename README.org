@@ -1,0 +1,113 @@
+This is an implementation of the [[https://en.wikipedia.org/wiki/Stable_matching_problem][stable marriage problem]] (stable matching problem)
+and the [[https://en.wikipedia.org/wiki/Gale%E2%80%93Shapley_algorithm][Gale-Shapley algorithm]] (deferred acceptance algorithm) in Haskell.
+
+* Features
+** Deferred Acceptance Algorithm
+After importing the library, it can be used as follows:
+#+BEGIN_SRC haskell
+import MarriageProblem
+prefs :: PrefProfile String String
+prefs = listToPrefProfile
+  ([("m1", ["w1", "w3", "w4", "w2"]), ("m2", ["w1", "w3", "w2", "w4"]),
+     ("m3", ["w2", "w1", "w3", "w4"]), ("m4" , ["w2", "w4" , "w1", "w3"])],
+   [("w1", ["m4", "m3", "m1", "m2"]), ("w2", ["m2", "m4", "m1", "m3"]),
+     ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
+
+prefs2 :: PrefProfile Int Int
+prefs2 = listToPrefProfile
+  ([(0, [7,5,6,4]), (1, [5,4,6,7]),
+     (2, [4, 5, 6, 7]), (3, [4, 5, 6, 7])],
+   [(4, [0, 1, 2, 3]), (5, [0, 1, 2, 3]),
+     (6, [0, 1, 2, 3]), (7, [0, 1, 2, 3])])
+
+deferredAcceptanceAlg prefs
+deferredAcceptanceAlgWomenPropose prefs
+deferredAcceptanceAlg prefs2
+#+END_SRC
+
+This demonstrates the main algorithms, namely =deferredAcceptanceAlg= and =deferredAcceptanceAlgWomen=.
+The latter has the second entries ("women") propose instead of the first entries ("men").
+
+** Checks
+Given a matching, it can be checked for stability using =isStableMatching=.
+Use =hasFavorite= to check if some person obtained their favorite partner in the matching.
+
+** Exhaustive Search
+For exhaustive searches, we provide:
+- =computeMatchings= to compute matchings for all preference profiles of a certain size (up to permutation).
+- =computeAllMatchings= to compute matchings for all preference profiles of a certain size
+- =computeFairMatchings= to compute all "fair" matchings.
+  Here we call a matching /fair/ if it is the result of the deferred acceptance algorithm
+  both when men and when women propose.
+
+Due to the exponential runtime, these are only useful for small inputs.
+
+** Converter
+Finally, for convenience a function =listToPrefProfile= is provided in order
+to convert a pair of association lists to preference profiles.
+
+* Example Usages
+Using this library, it is straightforward to find small examples
+and counterexamples for many questions.
+
+** Fair matchings
+We call a matching /fair/ if it is the result of the deferred acceptance algorithm
+both when men and when women propose.
+
+#+BEGIN_SRC haskell
+n = 3
+num_matchings = length . computeAllMatchings $ n
+num_fair_matchings = length . computeFairMatchings $ n
+#+END_SRC
+We see that for $n = 2$, $14/16 = 87.5\%$ of all matchings are fair.
+Similarly, for $n = 3$, $34080/46656 \approx 73\%$ of all matchings are fair.
+
+With
+#+BEGIN_SRC haskell
+computeMatchings 2 \\ computeFairMatchings 2
+#+END_SRC
+the unique (up to permutation) non-fair matching for $n=2$ is
+| Men | Women |
+|-----+-------|
+| m1  | w1    |
+| m2  | w2    |
+for the preference profiles
+| m1 | m2 | w1 | w2 |
+|----+----+----+----|
+| w1 | w2 | m2 | m1 |
+| w2 | w1 | m1 | m2 |
+
+#+BEGIN_SRC haskell
+(,,) ((uncurry deferredAcceptanceAlg) prefs2) (fst prefs2) (snd prefs2) `elem` (computeFairMatchings $ 3)
+#+END_SRC
+
+#+RESULTS: False
+
+
+This example shows that the stable matchings are not optimal for all men
+(/strongly Pareto optimal/)
+when considering the set of all (not necessarily stable) matchings.
+
+Does any collection of preference profiles always admit a stable matching
+where at least one person gets their first choice?
+The answer is no; a counter example was already given by Gale and Shapley
+in their original paper from 1962, which here translates to
+#+BEGIN_SRC haskell
+prefs3 :: ([(String, [String])], [(String, [String])])
+prefs3 = ([("m1", ["w1", "w2", "w3", "w4"]), ("m2", ["w1", "w4", "w3", "w2"]),
+          ("m3", ["w2", "w1", "w3", "w4"]), ("m4" , ["w4", "w2" , "w3", "w1"])],
+         [("w1", ["m4", "m3", "m1", "m2"]), ("w2", ["m2", "m4", "m1", "m3"]),
+          ("w3", ["m4", "m1", "m2", "m3"]), ("w4", ["m3", "m2", "m1", "m4"])])
+matching3 = onLists deferredAcceptanceAlg $ prefs3
+(onLists $ hasFavorite matching3) prefs3
+#+END_SRC
+
+
+
+
+Own example:
+(fromList [("m1","w2"),("m2","w3"),("m3","w1"),("m4","w4")],[("m1",["w1","w2","w3","w4"]),("m2",["w1","w2","w3","w4"]),("m3",["w2","w1","w3","w4"]),("m4",["w3","w4","w2","w1"])],[("w1",["m4","m3","m2","m1"]),("w2",["m4","m1","m2","m3"]),("w3",["m1","m2","m3","m4"]),("w4",["m3","m4","m2","m1"])])
+
+
+head . filter (uncurry3 hasFavorite) . computeFairMatchings $ 4
+(fromList [(1,2),(2,3),(3,1),(4,4)],[(1,[1,2,3,4]),(2,[1,2,3,4]),(3,[2,1,3,4]),(4,[3,4,2,1])],[(1,[4,3,2,1]),(2,[4,1,2,3]),(3,[1,2,3,4]),(4,[3,4,2,1])])
