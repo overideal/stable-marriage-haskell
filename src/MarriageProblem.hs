@@ -1,13 +1,15 @@
 {-# LANGUAGE TupleSections #-}
--- Permits multiple declarations of the same attribute in different classes.
--- {-# LANGUAGE DuplicateRecordFields #-}
 
-module MarriageProblem where
+module MarriageProblem (Pref, PrefProfile, Matching, deferredAcceptanceAlg,
+                        deferredAcceptanceAlgWomen, isStableMatching,
+                        hasFavorite, computeMatchings, computeAllMatchings,
+                        computeUniqueMatchings, computeAllUniqueMatchings,
+                        listToPrefProfile) where
 
 import Data.List
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import Data.Tuple.Extra -- (&&&), uncurry3, dupe, first, swap
+import Data.Tuple.Extra
 import qualified Math.Combinatorics.Multiset as MSet
 
 
@@ -15,6 +17,8 @@ import qualified Math.Combinatorics.Multiset as MSet
 -- * Types
 
 type Pref a b = Map.Map a [b]
+
+type PrefProfile a b = (Pref a b, Pref b a)
 
 type PartialMatching a b = Map.Map b a
 
@@ -24,13 +28,13 @@ type Matching a b = Map.Map a b
 
 -- * Main Algorithm
 
-deferredAcceptanceAlg :: (Ord a, Ord b) => Pref a b -> Pref b a -> Matching a b
-deferredAcceptanceAlg prefs_men =
-  Map.fromList . map swap . Map.toList . flip deferredAcceptanceAlgWomen prefs_men
+deferredAcceptanceAlg :: (Ord a, Ord b) => PrefProfile a b -> Matching a b
+deferredAcceptanceAlg =
+  Map.fromList . map swap . Map.toList . deferredAcceptanceAlgWomen . swap
 
 
-deferredAcceptanceAlgWomen :: (Ord a, Ord b) => Pref a b -> Pref b a -> Matching a b
-deferredAcceptanceAlgWomen prefs_men prefs_women =
+deferredAcceptanceAlgWomen :: (Ord a, Ord b) => PrefProfile a b -> Matching a b
+deferredAcceptanceAlgWomen (prefs_men, prefs_women) =
   snd . until (null . fst . fst) iterator $ ((women, prefs_women), Map.empty)
   where
     -- iterator :: (([a], Pref a b), PartialMatching a b) -> (([a],Pref a b), PartialMatching a b)
@@ -75,76 +79,26 @@ forgetFavorite Nothing = id
 
 
 
--- * Example Generation
-
-
-computeMatchings :: Int -> [(Matching Int Int, (Pref Int Int, Pref Int Int))]
-computeMatchings =
-  map (uncurry deferredAcceptanceAlg &&& id) . generatePrefsPerm
-
-
-computeAllMatchings :: Int -> [(Matching Int Int, (Pref Int Int, Pref Int Int))]
-computeAllMatchings =
-  map (uncurry deferredAcceptanceAlg &&& id) . generatePrefs
-
-
--- Find matchings for setups with n actors per gender from the deferredAcceptanceAlg
--- that agree for both men and women.
-computeFairMatchings :: Int -> [(Matching Int Int, (Pref Int Int, Pref Int Int))]
-computeFairMatchings =
-  map (first fst)
-  . filter (uncurry (==) . fst)
-  . map (first (uncurry deferredAcceptanceAlg &&&
-                uncurry deferredAcceptanceAlgWomen) . dupe)
-  . generatePrefsPerm
-
-
--- Generate all preference profiles, up to permutations.
-generatePrefsPerm :: Int -> [(Pref Int Int, Pref Int Int)]
-generatePrefsPerm n = (,) <$> prefs_men <*> prefs_women
-  where
-    prefs_men :: [Pref Int Int]
-    prefs_men = map make_pref . MSet.kSubsets (n-1) . MSet.fromCounts . map (, n-1) $ perms
-    prefs_women = map (Map.fromDistinctAscList . zip [1..n]) . draw_with_order_repeating n . permutations $ [1..n]
-    perms :: [[Int]]
-    perms = permutations [1..n]
-    make_pref :: MSet.Multiset [Int] -> Pref Int Int
-    make_pref = Map.fromList . zip [1..n] . ([1..n]:) . concatMap (uncurry $ flip replicate) . MSet.toCounts
-
-
--- Generate all preference profiles.
--- This is very inefficient, since permutations are not considered.
-generatePrefs :: Int -> [(Pref Int Int, Pref Int Int)]
-generatePrefs n = (,) <$> prefs <*> prefs
-  where
-    prefs = map (Map.fromDistinctAscList . zip [1..n]) . draw_with_order_repeating n . permutations $ [1..n]
-
-
--- Generate all n element sets, where order matters and elements may be drawn multiple times.
--- If the given list contains k lements, then the returned list thus contains k^n elements.
-draw_with_order_repeating :: Int -> [a] -> [[a]]
-draw_with_order_repeating 0 _ = []
-draw_with_order_repeating 1 list = map singleton list
-draw_with_order_repeating n list = concat [map (element:) (draw_with_order_repeating (n-1) list) | element <- list]
-
-
-
 -- * Checks
 
 -- ** Check if a matching is stable
 
 -- Check whether the given matching is stable.
-isStableMatching :: (Ord a, Ord b) => Pref a b -> Pref b a -> Matching a b -> Bool
-isStableMatching prefs_men prefs_women matching =
-  any mapper matching_list
+isStableMatching :: (Ord a, Ord b) => PrefProfile a b -> Matching a b -> Bool
+isStableMatching (prefs_men, prefs_women) matching =
+  not . any mapper $ matching_list
   where
     -- mapper :: (a, b) -> Bool
-    mapper (m,w) = any (new_man_is_preferred m (getPartner matching_list w)) . takeWhile (/= w) . Map.findWithDefault (error "No preference found") m $ prefs_men
-    -- new_man_is_preferred :: a -> a -> b -> Bool
-    new_man_is_preferred new_man old_man woman =
-      (== new_man) . fromJust . find (`elem` [old_man,new_man]) .
+    mapper (m,w) = any (new_man_is_preferred m) .
+                   takeWhile (/= w) .
+                   Map.findWithDefault (error "No preference found") m $ prefs_men
+    -- new_man_is_preferred :: a -> b -> Bool
+    new_man_is_preferred new_man woman =
+      let old_man = getPartner matching_list woman
+      in (== new_man) . fromJust . find (`elem` [old_man,new_man]) .
       Map.findWithDefault (error "No preference found") woman $ prefs_women
     matching_list = Map.toList matching
+
 
 getPartner :: Eq b => [(a, b)] -> b -> a
 getPartner matching w = fst . fromJust $ find ((== w) . snd) matching
@@ -154,13 +108,79 @@ getPartner matching w = fst . fromJust $ find ((== w) . snd) matching
 
 -- Given a matching, a preference of men and a preference of women,
 -- return True if and only if some person receives their favorite partner.
-hasFavorite :: (Ord a, Ord b) => Matching a b -> Pref a b -> Pref b a -> Bool
-hasFavorite matching prefs_men prefs_women = any is_favorite . Map.toList $ matching
+hasFavorite :: (Ord a, Ord b) => PrefProfile a b -> Matching a b -> Bool
+hasFavorite (prefs_men, prefs_women) matching = any is_favorite . Map.toList $ matching
   where
     -- is_favorite :: (a, b) -> Bool
     is_favorite (man, woman) =
       getFavorite man prefs_men == woman || getFavorite woman prefs_women == man
 
 
-onLists :: (Ord a, Ord b) => (Pref a b -> Pref b a -> c) -> ([(a,[b])], [(b,[a])]) -> c
-onLists f (prefs_men, prefs_women) = f (Map.fromList prefs_men) (Map.fromList prefs_women)
+
+-- * Exhaustive Search
+
+
+computeMatchings :: Int -> [(PrefProfile Int Int, Matching Int Int)]
+computeMatchings =
+  map (id &&& deferredAcceptanceAlg) . generatePrefsPerm
+
+
+computeAllMatchings :: Int -> [(PrefProfile Int Int, Matching Int Int)]
+computeAllMatchings =
+  map (id &&& deferredAcceptanceAlg) . generatePrefs
+
+
+-- Find matchings for setups with n actors per gender from the deferredAcceptanceAlg
+-- that agree for both men and women.
+computeUniqueMatchings :: Int -> [(PrefProfile Int Int, Matching Int Int)]
+computeUniqueMatchings =
+  map (second fst)
+  . filter (uncurry (==) . snd)
+  . map (second (deferredAcceptanceAlg &&&
+                deferredAcceptanceAlgWomen) . dupe)
+  . generatePrefsPerm
+
+
+computeAllUniqueMatchings :: Int -> [(PrefProfile Int Int, Matching Int Int)]
+computeAllUniqueMatchings =
+  map (second fst)
+  . filter (uncurry (==) . snd)
+  . map (second (deferredAcceptanceAlg &&&
+                deferredAcceptanceAlgWomen) . dupe)
+  . generatePrefs
+
+
+-- Generate all preference profiles, up to permutations.
+generatePrefsPerm :: Int -> [PrefProfile Int Int]
+generatePrefsPerm n = (,) <$> prefs_men <*> prefs_women
+  where
+    prefs_men :: [Pref Int Int]
+    prefs_men = map make_pref . MSet.kSubsets (n-1) . MSet.fromCounts . map (, n-1) $ perms
+    prefs_women = map (Map.fromDistinctAscList . zip [1..n]) . drawWithOrderRepeating n . permutations $ [1..n]
+    perms :: [[Int]]
+    perms = permutations [1..n]
+    make_pref :: MSet.Multiset [Int] -> Pref Int Int
+    make_pref = Map.fromList . zip [1..n] . ([1..n]:) . concatMap (uncurry $ flip replicate) . MSet.toCounts
+
+
+-- Generate all preference profiles.
+-- This is very inefficient, since permutations are not considered.
+generatePrefs :: Int -> [PrefProfile Int Int]
+generatePrefs n = (,) <$> prefs <*> prefs
+  where
+    prefs = map (Map.fromDistinctAscList . zip [1..n]) . drawWithOrderRepeating n . permutations $ [1..n]
+
+
+-- Generate all n element sets, where order matters and elements may be drawn multiple times.
+-- If the given list contains k lements, then the returned list thus contains k^n elements.
+drawWithOrderRepeating :: Int -> [a] -> [[a]]
+drawWithOrderRepeating 0 _ = []
+drawWithOrderRepeating 1 list = map singleton list
+drawWithOrderRepeating n list = concat [map (element:) (drawWithOrderRepeating (n-1) list) | element <- list]
+
+
+
+-- * Converters
+
+listToPrefProfile :: (Ord a, Ord b) => ([(a,[b])], [(b,[a])]) -> PrefProfile a b
+listToPrefProfile (prefs_men, prefs_women) = (Map.fromList prefs_men, Map.fromList prefs_women)
