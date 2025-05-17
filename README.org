@@ -5,7 +5,7 @@ and the [[https://en.wikipedia.org/wiki/Gale%E2%80%93Shapley_algorithm][Gale-Sha
 ** Deferred Acceptance Algorithm
 After importing the library, it can be used as follows:
 #+BEGIN_SRC haskell
-import MarriageProblem
+import StableMarriage
 prefs :: PrefProfile String String
 prefs = listToPrefProfile
   ([("m1", ["w1", "w3", "w4", "w2"]), ("m2", ["w1", "w3", "w2", "w4"]),

@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 
-module MarriageProblem (Pref, PrefProfile, Matching, deferredAcceptanceAlg,
+module StableMarriage (Pref, PrefProfile, Matching, deferredAcceptanceAlg,
                         deferredAcceptanceAlgWomen, isStableMatching,
                         hasFavorite, computeMatchings, computeAllMatchings,
                         computeUniqueMatchings, computeAllUniqueMatchings,
