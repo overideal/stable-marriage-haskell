@@ -1,6 +1,6 @@
 module Main (main) where
 
-import MarriageProblem
+import StableMarriage
 import Test.Tasty
 import Test.Tasty.HUnit
 
